@@ -1,0 +1,262 @@
+---
+title: "DataClean"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+# Useful Packages
+Packages <- c("tidyverse", "skimr", "lubridate", "ggplot2", "gganimate", "RColorBrewer", "DT", "readr", "maptools","rmapshaper",
+              "randomForest", "dplyr", "janitor", "grid", "scales", "leaflet", "leaflet.extras","sf","htmltools", "rgdal", "ECharts2Shiny")
+
+# Install New Packages
+new.packages <- Packages[!(Packages %in% installed.packages()[,"Package"])]
+if(length(new.packages)) install.packages(new.packages)
+
+# Load Packages
+lapply(Packages, library, character.only = TRUE)
+```
+
+```{r data}
+# data <- read.csv("Raleigh_Police_Incidents_(NIBRS).csv")
+# 
+# data <- data %>% 
+#   select(-OBJECTID, -GlobalID, -case_number)
+# 
+# saveRDS(data, "data.rds")
+
+data <- readRDS(file = "data.rds")
+
+
+freqs <- apply(data, 2, function(x) table(x))
+
+data %>% 
+  group_by(crime_category, crime_description) %>% 
+  count()
+```
+
+```{r}
+data %>%
+  group_by(reported_year) %>%
+  count()
+
+data %>%
+  group_by(reported_month) %>%
+  count()
+
+data %>%
+  group_by(reported_hour) %>%
+  count()
+
+
+daily_count <- data %>%
+  group_by(reported_year, reported_month, reported_day) %>%
+  count()
+
+daily_count$Date <- with(daily_count, mdy(paste(reported_month, reported_day, reported_year)))
+daily_count$Date <- as.Date(daily_count$Date)
+daily_count$Day <- wday(daily_count$Date, label = TRUE)
+
+hour_crime <- data %>%
+  group_by(reported_hour, crime_category) %>%
+  count() %>%  
+  arrange(reported_hour, desc(n))
+
+
+
+```
+
+```{r}
+png(filename="plots/crime_by_hr_category.png", width=1000, height=600)
+p <- hour_crime %>%
+  ggplot( aes(x=reported_hour, y=n, group=crime_category, color=crime_category)) +
+    geom_line() +
+    geom_point() +
+    geom_text(data = subset(hour_crime, reported_hour == 23), aes(label = crime_category, x = 23), hjust = -.1) +
+    scale_colour_discrete(guide = 'none')  +  
+    scale_x_continuous(expand = c(0,0), limits = c(0,30)) +
+    theme_classic() 
+p
+dev.off()
+
+png(filename="plots/crime_by_hr_category_zoom.png", width=1000, height=600)
+p <- hour_crime %>%
+  ggplot( aes(x=reported_hour, y=n, group=crime_category, color=crime_category)) +
+    geom_line() +
+    geom_point() +
+    geom_text(data = subset(hour_crime, reported_hour == 23), aes(label = crime_category, x = 23), hjust = -.1) +
+    scale_colour_discrete(guide = 'none')  +  
+    scale_x_continuous(expand = c(0,0), limits = c(0,30)) +
+    coord_cartesian(ylim=c(0,1000)) +
+    theme_classic() 
+p
+dev.off()
+
+
+png(filename="plots/crime_by_hr_category_zoom2.png", width=1000, height=600)
+p <- hour_crime %>%
+  ggplot( aes(x=reported_hour, y=n, group=crime_category, color=crime_category)) +
+    geom_line() +
+    geom_point() +
+    geom_text(data = subset(hour_crime, reported_hour == 23), aes(label = crime_category, x = 23), hjust = -.1) +
+    scale_colour_discrete(guide = 'none')  +  
+    scale_x_continuous(expand = c(0,0), limits = c(0,30)) +
+    coord_cartesian(ylim=c(0,250)) +
+    theme_classic() 
+p
+dev.off()
+```
+
+
+
+```{r}
+png(filename="plots/daily_count.png", width=1000, height=600)
+p <- daily_count %>% 
+  ggplot(aes(x=Date, y=n, colour=Day)) + 
+  geom_path() + 
+  geom_point() + 
+  scale_x_date(date_breaks = "1 year", date_minor_breaks = "1 month",date_labels = "%Y") + 
+  # scale_x_continuous()
+  facet_grid(Day ~.) +
+  theme(legend.position="none") 
+p
+dev.off()
+
+
+```
+
+
+```{r}
+restaurants <- read.csv("Restaurants_in_Wake_County.csv")
+
+bars <- restaurants %>% 
+  filter(str_detect(str_to_lower(NAME), "bar|pub|brew|tavern|wine")) %>%
+  filter(X != 0)
+  
+
+drunk <- data %>%
+  filter(crime_description == "Traffic/DWI (Driving While Impaired)") %>%
+  filter(reported_year == 2020)
+
+
+# shp <- readOGR("wake-county-restaurants/wake-county-restaurants.shp")
+
+bar_labels <- sprintf("%s", bars$NAME) %>% lapply(htmltools::HTML)
+drunk_labels <- sprintf("%s", drunk$reported_date) %>% lapply(htmltools::HTML)
+
+leaflet() %>%
+  addTiles() %>%
+  addCircleMarkers(lng=bars$X, lat=bars$Y, color = "red", radius = 1, opacity = .8, popup = bar_labels, group = "bars") %>% 
+  addCircleMarkers(lng=drunk$X, lat=drunk$Y, color = "blue", radius = 1, opacity = .3, popup = drunk_labels, group = "drunk") %>% 
+  addLayersControl(
+    overlayGroups = c("bars","drunk"),
+    options = layersControlOptions(collapsed = FALSE)
+  ) %>% 
+  addLegend(color = "red", labels = "Bars", group = "bars", position = "bottomright") %>%
+  addLegend(color = "blue", labels = "Drunk", group = "drunk", position = "bottomright")
+```
+
+```{r}
+districts <- readOGR("Raleigh_Police_Districts-shp/36fb2022-1da1-4d1a-bb87-2ed50e13377f202044-1-bpyxg.ix8bs.shp")
+districts$col <- colorRampPalette(brewer.pal(8, "Set1"))(6)
+# saveRDS(districts, "districts.rds")
+
+
+departments <- readOGR("Police_Departments-shp/Police_Departments.shp")
+saveRDS(departments, "police_stations.rds")
+
+```
+
+```{r}
+districts_drunk <- drunk %>% 
+  group_by(district) %>% 
+  count() %>%
+  full_join(.,districts@data, by = c("district" = "DISTRICT"))
+districts@data <- districts_drunk
+
+
+max <- max(districts$n)
+min <- min(districts$n)
+quint <- (max-min)/5
+bins <- c(min, min+quint, min+2*quint,min+3*quint,min+4*quint, max)
+pal <- colorBin("YlOrRd", domain = districts$n, bins = bins)
+
+dlabels <- sprintf(
+  "<strong>%s</strong><br/>%g crimes",
+  districts$district, districts$n
+) %>% lapply(htmltools::HTML)
+
+leaflet() %>%
+  setView(-78.6, 35.8, 10.5) %>%
+  addTiles() %>%
+  addCircleMarkers(lng=departments@coords[,1], lat=departments@coords[,2], color = "blue", radius = 1, opacity = .8) %>% 
+  addProviderTiles(providers$CartoDB.Positron) %>% 
+  addPolygons(data = districts, color = districts$col, fillColor = ~pal(n), fillOpacity = 0.7, label = dlabels, highlight = highlightOptions(
+    weight = 5,
+    color = "#666",
+    fillOpacity = 1,
+    bringToFront = TRUE)) %>% 
+  addLegend(pal = pal, values = districts$n, opacity = 0.7, position = "bottomright")
+```
+
+
+
+```{r}
+leaflet() %>%
+  setView(-78.6, 35.8, 10.5) %>%
+  addTiles() %>%
+  addCircleMarkers(lng=departments@coords[,1], lat=departments@coords[,2], color = "blue", radius = 1, opacity = .8) %>% 
+  addProviderTiles(providers$CartoDB.Positron) %>% 
+  addPolygons(data = districts, col = districts$col,fillColor = districts$col , fill = TRUE, label = districts$DISTRICT, highlight = highlightOptions(
+    weight = 5,
+    color = "#666",
+    fillOpacity = 0.7,
+    bringToFront = TRUE)) 
+
+```
+
+
+```{r}
+data_zips <- read.csv("Raleigh_Police_Incidents_(NIBRS)_with_zipcodes.csv")
+data_zips <- data_zips %>%
+  select(-OBJECTID, -GlobalID, -case_number)
+
+saveRDS(data_zips, "data_zips.rds")
+
+raleigh_zips <- readRDS("raleigh_zipcode_shp.rds")
+raleigh_zips$GEOID10 <- as.numeric(raleigh_zips$GEOID10)
+
+drunk <- data_zips %>%
+  filter(crime_description == "Traffic/DWI (Driving While Impaired)") %>%
+  filter(reported_year == 2020)
+
+zips_drunk <- drunk %>% 
+  group_by(zips) %>% 
+  count() %>%
+  full_join(.,raleigh_zips@data, by = c("zips" = "GEOID10"))
+raleigh_zips@data <- zips_drunk
+
+
+max <- max(raleigh_zips$n, na.rm = TRUE)
+min <- min(raleigh_zips$n, na.rm = TRUE)
+quint <- (max-min)/5
+bins <- c(min, min+quint, min+2*quint,min+3*quint,min+4*quint, max)
+pal <- colorBin("YlOrRd", domain = raleigh_zips$n, bins = bins)
+
+dlabels <- sprintf(
+  "<strong>%s</strong><br/>%g crimes",
+  raleigh_zips$zips, raleigh_zips$n
+) %>% lapply(htmltools::HTML)
+
+leaflet() %>%
+  setView(-78.6, 35.8, 10.5) %>%
+  addTiles() %>%
+  addCircleMarkers(lng=departments@coords[,1], lat=departments@coords[,2], color = "blue", radius = 1, opacity = .8) %>% 
+  addProviderTiles(providers$CartoDB.Positron) %>% 
+  addPolygons(data = raleigh_zips, fillColor = ~pal(n), fillOpacity = 0.7, label = dlabels, highlight = highlightOptions(
+    weight = 5,
+    color = "#666",
+    fillOpacity = 1,
+    bringToFront = TRUE)) %>% 
+  addLegend(pal = pal, values = raleigh_zips$n, opacity = 0.7, position = "bottomright")
+
+```

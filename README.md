@@ -1,1 +1,1 @@
-# NCSU_Datathon_21
+# NCSUDatathon
